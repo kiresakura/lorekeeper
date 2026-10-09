@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     cooldown_seconds: float = 3.0  # debounce window for bursty messages
     max_batch_size: int = 20  # force a flush at this many messages
     noise_filter_enabled: bool = True  # drop low-value (noise) batches
+    dedup_max_ids: int = 10_000  # recent message keys kept to drop redeliveries
+    dedup_state_path: str = ""  # persist those keys here ("" = memory only)
     categories: list[str] = [
         "技術分享",
         "新聞資訊",

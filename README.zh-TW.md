@@ -83,6 +83,7 @@ lorekeeper serve           # 或：uvicorn lorekeeper.app:app --port 8000
 - **成本導向模型路由** — 文字／影像用便宜模型，只有混合／複雜批次才動用較強模型（可設定）。
 - **完整知識萃取，不是摘要** — prompt 經過調校，盡量保留每個細節、程式碼區塊與步驟。
 - **智慧聚合** — 依對話做防抖（debounce），讓一串連發訊息合併成一筆連貫的條目。
+- **冪等的訊息接收** — LINE 與 Telegram 在 webhook 沒及時回應時會重送事件；以有界、可選擇存檔的「最近訊息 key」集合擋掉重複，重啟後也有效。
 - **SSRF 強化的 URL 爬取** — yt-dlp（1000+ 影片站）+ BeautifulSoup，外層有 fetch 防護：封鎖私有／loopback／雲端 metadata 目標，並限制回應大小。
 - **穩健的 Notion 寫入** — 令牌桶限流（2.5 req/s）+ 指數退避重試，遵守 Notion 的 100 區塊／2000 字元上限。
 - **多重輸出（fan-out）** — 同一筆條目可同時寫入 Notion *和*本地 Markdown／JSONL。
@@ -135,6 +136,7 @@ class JsonlSink:
 | `OPENROUTER_API_KEY` | OpenRouter 金鑰；`AI_MODEL_*` 可覆寫路由 |
 | `COOLDOWN_SECONDS` / `MAX_BATCH_SIZE` | 聚合調校 |
 | `NOISE_FILTER_ENABLED` | 丟棄被判為「噪音」的批次 |
+| `DEDUP_MAX_IDS` / `DEDUP_STATE_PATH` | 重送防護：記住最近幾個訊息 key，以及存檔路徑（留空＝只放記憶體） |
 
 **Notion DB 結構**（sink 預期這些屬性）：`Title`(title)、`Category`(select)、
 `Importance`(select)、`Tags`(multi-select)、`Source`(select)、`Date`(date)、
@@ -151,16 +153,16 @@ lorekeeper/
 ├── config.py           # 設定 + adapter 選擇
 ├── app.py              # 組裝根（composition root）：依設定 wire 各 adapter
 ├── cli.py              # `lorekeeper demo` / `serve`
-├── pipeline/           # enricher → aggregator → classifier → orchestrator
+├── pipeline/           # dedup → enricher → aggregator → classifier → orchestrator
 ├── adapters/           # LINE、Telegram、Notion、Markdown、JSONL、OpenRouter、Mock —— 唯一的供應商程式碼
 └── services/           # safe_http（SSRF 防護）、url_fetcher
-tests/                  # 36 個測試：純邏輯、SSRF 防護、debounce、classifier、sinks、DI/webhook
+tests/                  # 44 個測試：純邏輯、SSRF 防護、debounce、dedup、classifier、sinks、DI/webhook
 ```
 
 ## 測試
 
 ```bash
-pytest            # 36 個測試，免網路、免金鑰
+pytest            # 44 個測試，免網路、免金鑰
 ruff check . && ruff format --check .
 ```
 

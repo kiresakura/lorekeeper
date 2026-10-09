@@ -9,12 +9,12 @@ the [README](README.md).
 source webhook (LINE / Telegram)
    │  verify signature/secret, normalize event, download media
    ▼
-InboundMessage ──▶ Enricher ──▶ Aggregator ──▶ Orchestrator ──▶ Sink(s)
-                   crawl URLs    debounce per     classify +       Notion /
-                   (SSRF-safe)   conversation     fan-out          Markdown
-                                                       │
-                                                  LLMProvider
-                                               (OpenRouter / Mock)
+InboundMessage ──▶ Dedup ─────▶ Enricher ──▶ Aggregator ──▶ Orchestrator ──▶ Sink(s)
+                   drop         crawl URLs   debounce per   classify +       Notion /
+                   redeliveries (SSRF-safe)  conversation   fan-out          Markdown
+                                                                    │
+                                                               LLMProvider
+                                                            (OpenRouter / Mock)
 ```
 
 Each stage is small and single-purpose; stages communicate through the domain
@@ -29,7 +29,7 @@ the pipeline never depends outward.
 
 ```
 adapters/ ──implements──▶ ports.py ◀──depends on── pipeline/
-(LINE, Telegram, Notion, Markdown,                  (enricher, aggregator,
+(LINE, Telegram, Notion, Markdown,                  (dedup, enricher, aggregator,
  JSONL, OpenRouter, Mock)                            classifier, orchestrator)
 ```
 
@@ -48,6 +48,7 @@ the whole pipeline unit-testable with fakes.
 | **Cost-aware model routing** | text/vision on cheap models, a stronger model only for mixed batches | routing rules are heuristic, not learned |
 | **SSRF guard resolves DNS + re-checks each redirect hop** | blocks metadata/internal targets even via redirect | residual DNS-rebinding risk → pair with network egress policy in prod |
 | **Fire-and-forget tasks + global fetch semaphore** | webhook returns 200 fast (LINE requirement) | backpressure is bounded, not persisted |
+| **Dedup by (conversation, message id)** | LINE/Telegram redeliver on a missed 200; each message is processed once, also across restarts via a small key file | bounded window (`DEDUP_MAX_IDS`), not a durable log |
 | **In-memory aggregation** | simple, no broker needed for a single instance | not horizontally scalable as-is (see roadmap) |
 
 ## Security
@@ -66,6 +67,7 @@ The most logic-dense, pure pieces get the most tests:
 - `notion_blocks` — Markdown → Notion conversion (pure, exhaustive).
 - `safe_http` — SSRF classification + DNS checks (monkeypatched resolver).
 - `aggregator` — debounce/flush timing and conversation isolation.
+- `dedup` — redelivery, per-conversation keys, bounded window, restart persistence, concurrent redelivery storm.
 - `classifier` — JSON / fenced-JSON parsing, enum fallback, URL extraction (fake LLM).
 - `app` — DI wiring, `/health`, webhook signature rejection (FastAPI TestClient).
 - `telegram` — secret-token auth + Update → `InboundMessage` normalization.
@@ -78,6 +80,5 @@ Natural next steps, in rough priority order:
 
 1. **More adapters** — `DiscordSource` / `SlackSource`, `ObsidianSink` (each seam already ships 2–3 adapters as proof).
 2. **Durable queue** — swap in-memory aggregation for Redis/SQS to scale out and survive restarts.
-3. **Idempotency / de-dup** — persist processed message ids (LINE may redeliver).
-4. **Daily digest** — scheduled roll-up of a conversation's entries.
-5. **Observability** — structured logs + OpenTelemetry traces around each stage.
+3. **Daily digest** — scheduled roll-up of a conversation's entries.
+4. **Observability** — structured logs + OpenTelemetry traces around each stage.

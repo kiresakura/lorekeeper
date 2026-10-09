@@ -85,6 +85,7 @@ Then point your LINE channel's Webhook URL at `https://your-host/webhook`.
 - **Cost-aware model routing** — cheap models for text/vision, a stronger model only for mixed/complex batches (configurable).
 - **Full knowledge extraction, not summaries** — the prompt is tuned to preserve every detail, code block, and step.
 - **Smart aggregation** — per-conversation debounce so a burst of messages becomes one coherent entry.
+- **Idempotent ingestion** — LINE and Telegram redeliver events when the webhook doesn't answer in time; a bounded, optionally file-backed store of recent message keys drops the duplicates, including across restarts.
 - **SSRF-hardened URL crawling** — yt-dlp (1000+ video sites) + BeautifulSoup, behind a fetch guard that blocks private/loopback/cloud-metadata targets and caps response size.
 - **Resilient Notion writes** — token-bucket rate limiting (2.5 req/s) + exponential-backoff retries, respecting Notion's 100-block / 2000-char limits.
 - **Fan-out to multiple sinks** — write the same entry to Notion *and* local Markdown/JSONL at once.
@@ -138,6 +139,7 @@ All via environment variables (see [`.env.example`](.env.example)):
 | `OPENROUTER_API_KEY` | OpenRouter key; `AI_MODEL_*` override the routing |
 | `COOLDOWN_SECONDS` / `MAX_BATCH_SIZE` | aggregation tuning |
 | `NOISE_FILTER_ENABLED` | drop "noise"-rated batches |
+| `DEDUP_MAX_IDS` / `DEDUP_STATE_PATH` | redelivery guard: how many recent message keys to remember, and a file to persist them (empty = memory only) |
 
 **Notion DB schema** (sink expects these properties): `Title` (title), `Category` (select),
 `Importance` (select), `Tags` (multi-select), `Source` (select), `Date` (date),
@@ -154,16 +156,16 @@ lorekeeper/
 ├── config.py           # settings + adapter selection
 ├── app.py              # composition root: wires adapters from config
 ├── cli.py              # `lorekeeper demo` / `serve`
-├── pipeline/           # enricher → aggregator → classifier → orchestrator
+├── pipeline/           # dedup → enricher → aggregator → classifier → orchestrator
 ├── adapters/           # LINE, Telegram, Notion, Markdown, JSONL, OpenRouter, Mock — the only vendor code
 └── services/           # safe_http (SSRF guard), url_fetcher
-tests/                  # 36 tests: pure logic, SSRF guard, debounce, classifier, sinks, DI/webhook
+tests/                  # 44 tests: pure logic, SSRF guard, debounce, dedup, classifier, sinks, DI/webhook
 ```
 
 ## Testing
 
 ```bash
-pytest            # 36 tests, no network or credentials required
+pytest            # 44 tests, no network or credentials required
 ruff check . && ruff format --check .
 ```
 

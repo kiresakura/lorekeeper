@@ -28,9 +28,10 @@ from lorekeeper.config import Settings, get_settings
 from lorekeeper.models import InboundMessage
 from lorekeeper.pipeline.aggregator import MessageAggregator
 from lorekeeper.pipeline.classifier import MessageClassifier
+from lorekeeper.pipeline.dedup import MessageDeduplicator
 from lorekeeper.pipeline.enricher import MessageEnricher
 from lorekeeper.pipeline.orchestrator import Orchestrator
-from lorekeeper.ports import KnowledgeSink, LLMProvider, Notifier
+from lorekeeper.ports import KnowledgeSink, LLMProvider, MessageHandler, Notifier
 
 logging.basicConfig(
     level=logging.INFO,
@@ -102,6 +103,23 @@ def _build_source_router(settings: Settings, client, handle):
     return None
 
 
+def build_handler(
+    dedup: MessageDeduplicator,
+    enricher: MessageEnricher,
+    aggregator: MessageAggregator,
+) -> MessageHandler:
+    """The per-message entry point every source adapter pushes into."""
+
+    async def handle(msg: InboundMessage) -> None:
+        if await dedup.is_duplicate(msg):
+            logger.info(f"略過重複投遞的訊息: {msg.conversation_id}/{msg.id}")
+            return
+        await enricher.enrich(msg)
+        await aggregator.add(msg.conversation_id, msg)
+
+    return handle
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
 
@@ -119,11 +137,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cooldown_seconds=settings.cooldown_seconds,
         max_batch_size=settings.max_batch_size,
     )
-    enricher = MessageEnricher()
-
-    async def handle(msg: InboundMessage) -> None:
-        await enricher.enrich(msg)
-        await aggregator.add(msg.conversation_id, msg)
+    dedup = MessageDeduplicator(
+        max_ids=settings.dedup_max_ids, state_path=settings.dedup_state_path
+    )
+    handle = build_handler(dedup, MessageEnricher(), aggregator)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
